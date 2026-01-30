@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ztdc-config
+  namespace: zero-trust
+data:
+  # Domain Configuration
+  DOMAIN_NAME: "example.com"
+  DOMAIN_REALM: "EXAMPLE.COM"
+  BASE_DN: "dc=example,dc=com"
+  ORGANIZATION: "Example Organization"
+  
+  # Application Settings
+  DEBUG: "false"
+  LOG_LEVEL: "INFO"
+  JSON_LOGS: "true"
+  
+  # Identity Provider
+  OIDC_ENABLED: "true"
+  SAML_ENABLED: "true"
+  OAUTH2_ENABLED: "true"
+  
+  # Zero Trust Settings
+  MTLS_REQUIRED: "true"
+  DEVICE_TRUST_REQUIRED: "true"
+  CONTINUOUS_AUTH_INTERVAL: "3600"
+  MAX_SESSION_AGE: "28800"
+  
+  # MFA Settings
+  MFA_REQUIRED: "true"
+  TOTP_ENABLED: "true"
+  WEBAUTHN_ENABLED: "true"
+  
+  # TLS Configuration
+  USE_TLS: "true"
+  CERT_DIR: "/app/certs"
+  AUTO_INIT_CA: "true"
