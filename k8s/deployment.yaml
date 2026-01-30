@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ztdc
+  namespace: zero-trust
+  labels:
+    app: ztdc
+    component: domain-controller
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ztdc
+  template:
+    metadata:
+      labels:
+        app: ztdc
+        component: domain-controller
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9443"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: ztdc-service-account
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: ztdc
+        image: ztdc:latest  # Replace with your registry
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        - containerPort: 9443
+          name: metrics
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: ztdc-config
+        - secretRef:
+            name: ztdc-secrets
+        volumeMounts:
+        - name: certs
+          mountPath: /app/certs
+        - name: logs
+          mountPath: /app/logs
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: certs
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - ztdc
+              topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ztdc-service-account
+  namespace: zero-trust
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ztdc-role
+  namespace: zero-trust
+rules:
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ztdc-role-binding
+  namespace: zero-trust
+subjects:
+- kind: ServiceAccount
+  name: ztdc-service-account
+  namespace: zero-trust
+roleRef:
+  kind: Role
+  name: ztdc-role
+  apiGroup: rbac.authorization.k8s.io
