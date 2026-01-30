@@ -1,10 +1,12 @@
-"""Application configuration management."""
+"""
+Configuration Settings
+
+Environment-based configuration using Pydantic Settings.
+"""
 
 import secrets
-from functools import lru_cache
 from typing import List, Optional
-
-from pydantic import Field, PostgresDsn, RedisDsn, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,146 +21,222 @@ class Settings(BaseSettings):
     )
     
     # Application
+    APP_NAME: str = "Zero-Trust Domain Controller"
+    APP_VERSION: str = "1.0.0-alpha"
     DEBUG: bool = False
-    HOST: str = "0.0.0.0"
-    PORT: int = 8443
-    WORKERS: int = 4
-    LOG_LEVEL: str = "INFO"
-    JSON_LOGS: bool = True
+    ENVIRONMENT: str = Field(default="development", pattern="^(development|staging|production)$")
     
     # Domain Configuration
     DOMAIN_NAME: str = "example.com"
     DOMAIN_REALM: str = "EXAMPLE.COM"
     BASE_DN: str = "dc=example,dc=com"
-    ORGANIZATION: str = "Example Organization"
+    
+    # Server
+    HOST: str = "0.0.0.0"
+    PORT: int = 8443
+    WORKERS: int = 4
+    
+    # Security - CORS and Allowed Hosts
+    # ⚠️ SECURITY WARNING: Default values are for development only!
+    # In production, these MUST be set to specific domains.
+    ALLOWED_ORIGINS: List[str] = Field(
+        default_factory=lambda: [] if _is_production() else ["*"]
+    )
+    ALLOWED_HOSTS: List[str] = Field(
+        default_factory=lambda: [] if _is_production() else ["*"]
+    )
     
     # Database
-    DATABASE_URL: PostgresDsn = Field(
-        default="postgresql://ztdc:changeme123@localhost:5432/ztdc"
-    )
-    DB_POOL_SIZE: int = 20
-    DB_MAX_OVERFLOW: int = 10
-    DB_ECHO: bool = False
+    DATABASE_URL: str = "postgresql://ztdc:password@localhost:5432/ztdc"
+    REDIS_URL: str = "redis://localhost:6379/0"
     
-    # Redis
-    REDIS_URL: RedisDsn = Field(
-        default="redis://:changeme123@localhost:6379/0"
-    )
-    REDIS_SESSION_TTL: int = 3600
-    REDIS_CACHE_TTL: int = 300
-    
-    # Security
-    JWT_SECRET_KEY: str = Field(
-        default_factory=lambda: secrets.token_urlsafe(32)
-    )
+    # JWT Configuration
+    JWT_SECRET_KEY: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE: int = 900  # 15 minutes
-    JWT_REFRESH_TOKEN_EXPIRE: int = 604800  # 7 days
+    JWT_EXPIRATION_SECONDS: int = 3600  # 1 hour
     
-    ENCRYPTION_KEY: str = Field(
-        default_factory=lambda: secrets.token_urlsafe(32)
-    )
-    PASSWORD_MIN_LENGTH: int = 12
-    PASSWORD_REQUIRE_SPECIAL: bool = True
-    PASSWORD_REQUIRE_DIGITS: bool = True
-    PASSWORD_REQUIRE_UPPERCASE: bool = True
+    # Encryption
+    ENCRYPTION_KEY: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     
-    # TLS/SSL
-    USE_TLS: bool = True
-    CERT_DIR: str = "/app/certs"
-    CA_CERT_FILE: str = "ca.crt"
-    CA_KEY_FILE: str = "ca.key"
-    SERVER_CERT_FILE: str = "server.crt"
-    SERVER_KEY_FILE: str = "server.key"
-    CA_PASSPHRASE: str = Field(
-        default_factory=lambda: secrets.token_urlsafe(32)
-    )
-    CERT_VALIDITY_DAYS: int = 365
-    AUTO_INIT_CA: bool = True
+    # Certificate Authority
+    CA_PASSPHRASE: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
+    CA_KEY_SIZE: int = 4096
+    CA_VALIDITY_DAYS: int = 3650  # 10 years
+    CERT_VALIDITY_DAYS: int = 365  # 1 year
+    CA_DIR: str = "./ca"
+    CERTS_DIR: str = "./certs"
     
-    # Identity Provider
+    # LDAP Configuration
+    LDAP_ENABLED: bool = False  # ⚠️ Not implemented yet
+    LDAP_PORT: int = 389
+    LDAPS_PORT: int = 636
+    LDAP_BIND_DN: str = "cn=admin,dc=example,dc=com"
+    LDAP_BIND_PASSWORD: str = "changeme"
+    
+    # Identity Provider (IdP)
     OIDC_ENABLED: bool = True
     SAML_ENABLED: bool = True
     OAUTH2_ENABLED: bool = True
-    OIDC_ISSUER: Optional[str] = None
+    OIDC_ISSUER: Optional[str] = None  # Defaults to https://{DOMAIN_NAME}
     
-    @field_validator("OIDC_ISSUER")
-    @classmethod
-    def set_oidc_issuer(cls, v, info):
-        if v is None:
-            domain = info.data.get("DOMAIN_NAME", "localhost:8443")
-            return f"https://{domain}"
-        return v
+    # Multi-Factor Authentication
+    MFA_REQUIRED: bool = False
+    TOTP_ENABLED: bool = True
+    WEBAUTHN_ENABLED: bool = False  # ⚠️ Not implemented yet
+    SMS_MFA_ENABLED: bool = False  # ⚠️ Not implemented yet
+    TOTP_ISSUER: Optional[str] = None  # Defaults to APP_NAME
     
-    # Zero-Trust Configuration
+    # Zero-Trust Security
     MTLS_REQUIRED: bool = False
     DEVICE_TRUST_REQUIRED: bool = False
-    CONTINUOUS_AUTH_INTERVAL: int = 3600  # 1 hour
+    CONTINUOUS_AUTH_INTERVAL: int = 3600  # Re-auth check every hour
     MAX_SESSION_AGE: int = 28800  # 8 hours
-    SESSION_INACTIVITY_TIMEOUT: int = 1800  # 30 minutes
-    RISK_SCORE_THRESHOLD: float = 0.7
+    RISK_SCORE_THRESHOLD: float = 70.0  # Out of 100
     
-    # MFA Configuration
-    MFA_REQUIRED: bool = True
-    TOTP_ENABLED: bool = True
-    TOTP_ISSUER: Optional[str] = None
-    WEBAUTHN_ENABLED: bool = True
-    WEBAUTHN_RP_NAME: str = "Zero-Trust DC"
-    SMS_MFA_ENABLED: bool = False
+    # Account Security
+    PASSWORD_MIN_LENGTH: int = 12
+    PASSWORD_REQUIRE_UPPERCASE: bool = True
+    PASSWORD_REQUIRE_LOWERCASE: bool = True
+    PASSWORD_REQUIRE_DIGITS: bool = True
+    PASSWORD_REQUIRE_SPECIAL: bool = True
+    ACCOUNT_LOCKOUT_THRESHOLD: int = 5  # Failed attempts before lockout
+    ACCOUNT_LOCKOUT_DURATION: int = 30  # Minutes
     
-    @field_validator("TOTP_ISSUER")
-    @classmethod
-    def set_totp_issuer(cls, v, info):
-        if v is None:
-            return info.data.get("ORGANIZATION", "Zero-Trust DC")
-        return v
-    
-    # Policy Engine
-    POLICY_ENGINE: str = "internal"  # internal or opa
-    OPA_URL: Optional[str] = None
-    DEFAULT_POLICY: str = "deny"  # deny or allow
-    POLICY_CACHE_TTL: int = 300
-    
-    # LDAP Configuration
-    LDAP_ENABLED: bool = True
-    LDAP_PORT: int = 389
-    LDAPS_PORT: int = 636
-    LDAP_BIND_DN: Optional[str] = None
-    
-    @field_validator("LDAP_BIND_DN")
-    @classmethod
-    def set_ldap_bind_dn(cls, v, info):
-        if v is None:
-            return f"cn=admin,{info.data.get('BASE_DN', 'dc=example,dc=com')}"
-        return v
+    # Session Management
+    SESSION_TIMEOUT: int = 3600  # 1 hour
+    SESSION_ABSOLUTE_TIMEOUT: int = 28800  # 8 hours
+    IDLE_TIMEOUT: int = 1800  # 30 minutes
     
     # Rate Limiting
-    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_ENABLED: bool = False  # ⚠️ Not implemented yet
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_PER_HOUR: int = 1000
     
-    # CORS
-    ALLOWED_ORIGINS: List[str] = ["*"]
-    ALLOWED_HOSTS: List[str] = ["*"]
+    # Logging
+    LOG_LEVEL: str = Field(default="INFO", pattern="^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$")
+    JSON_LOGS: bool = True
+    AUDIT_LOG_ENABLED: bool = True
+    AUDIT_LOG_FILE: str = "./logs/audit.log"
     
     # Monitoring
-    PROMETHEUS_ENABLED: bool = True
-    METRICS_PORT: int = 9443
-    ENABLE_REQUEST_METRICS: bool = True
+    METRICS_ENABLED: bool = True
+    METRICS_PATH: str = "/metrics"
+    TRACING_ENABLED: bool = False  # ⚠️ Not implemented yet
     
-    # Audit Logging
-    AUDIT_LOG_ENABLED: bool = True
-    AUDIT_LOG_FILE: str = "/app/logs/audit.log"
-    AUDIT_LOG_RETENTION_DAYS: int = 90
+    # TLS/SSL
+    TLS_CERT_FILE: str = "./certs/server.crt"
+    TLS_KEY_FILE: str = "./certs/server.key"
+    TLS_MIN_VERSION: str = "TLSv1.3"
     
-    # Feature Flags
-    ENABLE_PASSWORD_RESET: bool = True
-    ENABLE_USER_REGISTRATION: bool = False
-    ENABLE_DEVICE_ENROLLMENT: bool = True
-    ENABLE_RISK_SCORING: bool = True
+    def get_oidc_issuer(self) -> str:
+        """Get OIDC issuer URL."""
+        if self.OIDC_ISSUER:
+            return self.OIDC_ISSUER
+        return f"https://{self.DOMAIN_NAME}"
+    
+    def get_totp_issuer(self) -> str:
+        """Get TOTP issuer name."""
+        if self.TOTP_ISSUER:
+            return self.TOTP_ISSUER
+        return self.APP_NAME
+    
+    def validate_security_config(self) -> List[str]:
+        """
+        Validate security configuration.
+        
+        Returns list of warnings/errors for insecure configurations.
+        This should be called at startup in production.
+        """
+        warnings = []
+        
+        # Check for production environment
+        if self.ENVIRONMENT == "production":
+            # Check CORS
+            if "*" in self.ALLOWED_ORIGINS:
+                warnings.append("CRITICAL: ALLOWED_ORIGINS contains '*' in production")
+            
+            if not self.ALLOWED_ORIGINS:
+                warnings.append("CRITICAL: ALLOWED_ORIGINS is empty in production")
+            
+            # Check allowed hosts
+            if "*" in self.ALLOWED_HOSTS:
+                warnings.append("CRITICAL: ALLOWED_HOSTS contains '*' in production")
+            
+            if not self.ALLOWED_HOSTS:
+                warnings.append("CRITICAL: ALLOWED_HOSTS is empty in production")
+            
+            # Check secrets
+            if len(self.JWT_SECRET_KEY) < 32:
+                warnings.append("CRITICAL: JWT_SECRET_KEY is too short")
+            
+            if len(self.ENCRYPTION_KEY) < 32:
+                warnings.append("CRITICAL: ENCRYPTION_KEY is too short")
+            
+            if len(self.CA_PASSPHRASE) < 16:
+                warnings.append("CRITICAL: CA_PASSPHRASE is too weak")
+            
+            # Check for weak defaults
+            if self.DATABASE_URL == "postgresql://ztdc:password@localhost:5432/ztdc":
+                warnings.append("WARNING: Using default DATABASE_URL")
+            
+            if self.LDAP_BIND_PASSWORD == "changeme":
+                warnings.append("WARNING: Using default LDAP_BIND_PASSWORD")
+            
+            # Check security features
+            if not self.MFA_REQUIRED:
+                warnings.append("WARNING: MFA is not required in production")
+            
+            if not self.TLS_MIN_VERSION == "TLSv1.3":
+                warnings.append("WARNING: TLS version should be 1.3 in production")
+        
+        return warnings
 
 
-@lru_cache()
+def _is_production() -> bool:
+    """Check if running in production based on ENVIRONMENT env var."""
+    import os
+    env = os.getenv("ENVIRONMENT", "development")
+    return env == "production"
+
+
+# Singleton instance
+_settings: Optional[Settings] = None
+
+
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+    """Get settings singleton."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
+
+
+def validate_startup_config():
+    """
+    Validate configuration at startup.
+    
+    In production, this will raise an exception if critical security
+    issues are found. In development, it will log warnings.
+    """
+    settings = get_settings()
+    warnings = settings.validate_security_config()
+    
+    if warnings:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        critical_warnings = [w for w in warnings if w.startswith("CRITICAL")]
+        other_warnings = [w for w in warnings if not w.startswith("CRITICAL")]
+        
+        if critical_warnings:
+            for warning in critical_warnings:
+                logger.error(warning)
+            
+            if settings.ENVIRONMENT == "production":
+                raise RuntimeError(
+                    f"Cannot start in production with critical security issues:\n" +
+                    "\n".join(critical_warnings)
+                )
+        
+        for warning in other_warnings:
+            logger.warning(warning)
