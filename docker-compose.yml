@@ -1,0 +1,137 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ztdc-postgres
+    environment:
+      POSTGRES_DB: ztdc
+      POSTGRES_USER: ztdc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ztdc-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ztdc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ztdc-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme123}
+    volumes:
+      - redis_data:/data
+    networks:
+      - ztdc-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ztdc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ztdc-server
+    ports:
+      - "8443:8443"
+      - "9443:9443"  # Metrics
+    environment:
+      # Domain Configuration
+      DOMAIN_NAME: ${DOMAIN_NAME:-example.com}
+      DOMAIN_REALM: ${DOMAIN_REALM:-EXAMPLE.COM}
+      BASE_DN: ${BASE_DN:-dc=example,dc=com}
+      
+      # Database
+      DATABASE_URL: postgresql://ztdc:${POSTGRES_PASSWORD:-changeme123}@postgres:5432/ztdc
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme123}@redis:6379/0
+      
+      # Security
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-generate-this-in-production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-generate-this-in-production}
+      CA_PASSPHRASE: ${CA_PASSPHRASE:-generate-this-in-production}
+      
+      # Identity Provider
+      OIDC_ENABLED: "true"
+      SAML_ENABLED: "true"
+      OAUTH2_ENABLED: "true"
+      OIDC_ISSUER: https://${DOMAIN_NAME:-localhost:8443}
+      
+      # Zero Trust
+      MTLS_REQUIRED: ${MTLS_REQUIRED:-false}
+      DEVICE_TRUST_REQUIRED: ${DEVICE_TRUST_REQUIRED:-false}
+      CONTINUOUS_AUTH_INTERVAL: ${CONTINUOUS_AUTH_INTERVAL:-3600}
+      MAX_SESSION_AGE: ${MAX_SESSION_AGE:-28800}
+      
+      # MFA
+      MFA_REQUIRED: ${MFA_REQUIRED:-true}
+      TOTP_ENABLED: "true"
+      WEBAUTHN_ENABLED: "true"
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JSON_LOGS: "true"
+    volumes:
+      - ./certs:/app/certs
+      - ./logs:/app/logs
+      - ./config:/app/config
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - ztdc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:8443/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ztdc-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - ztdc-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ztdc-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - ztdc-network
+
+networks:
+  ztdc-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
